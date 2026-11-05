@@ -3,14 +3,16 @@ import {
   fetchLeagueGames,
   fetchAllLeaguesRecent,
   fetchGameSummary,
-  fetchStandingsOrRankings
+  fetchStandingsOrRankings,
+  fetchLeagueLeaderboards
 } from './api.js';
 import { SportsReelPlayer } from './player.js';
 
 class SportsCenterApp {
   constructor() {
     this.activeTab = 'nba'; // 'my-teams' | 'nba' | 'nfl' | 'nhl' | 'cfb'
-    this.subView = 'games'; // 'games' | 'standings'
+    this.subView = 'games'; // 'games' | 'leaderboards' | 'standings'
+    this.leaderboardFilter = 'all'; // 'all' | 'players' | 'teams'
     this.searchQuery = '';
     this.customDate = '';
     this.spoilerFree = false;
@@ -23,6 +25,7 @@ class SportsCenterApp {
 
     // DOM Elements
     this.gridEl = document.getElementById('vault-grid');
+    this.leaderboardsContainerEl = document.getElementById('leaderboards-container');
     this.standingsContainerEl = document.getElementById('standings-container');
     this.sectionTitleEl = document.getElementById('section-title');
     this.sectionSubtitleEl = document.getElementById('section-subtitle');
@@ -195,14 +198,26 @@ class SportsCenterApp {
   }
 
   async render() {
+    const targetLeague = this.activeTab === 'my-teams' ? 'nba' : this.activeTab;
+
+    if (this.subView === 'leaderboards') {
+      this.gridEl.style.display = 'none';
+      this.standingsContainerEl.style.display = 'none';
+      this.leaderboardsContainerEl.style.display = 'block';
+      await this.renderLeaderboards(targetLeague);
+      return;
+    }
+
     if (this.subView === 'standings' && this.activeTab !== 'my-teams') {
       this.gridEl.style.display = 'none';
+      this.leaderboardsContainerEl.style.display = 'none';
       this.standingsContainerEl.style.display = 'block';
       await this.renderStandings(this.activeTab);
       return;
     }
 
     this.gridEl.style.display = 'grid';
+    this.leaderboardsContainerEl.style.display = 'none';
     this.standingsContainerEl.style.display = 'none';
 
     let games = [];
@@ -622,6 +637,150 @@ class SportsCenterApp {
     }
 
     Array.from(this.standingsContainerEl.querySelectorAll('[data-follow]')).forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.toggleFollowTeam(btn.dataset.follow);
+      });
+    });
+  }
+
+  async renderLeaderboards(leagueKey) {
+    const cfg = LEAGUES[leagueKey] || LEAGUES.nba;
+    this.sectionTitleEl.textContent = `🏆 ${cfg.icon} ${cfg.fullName} • Player & Team Leaderboards`;
+    this.sectionSubtitleEl.textContent =
+      'Live season leaders across major player & team statistical categories • Click ★ to follow any team';
+    this.leaderboardsContainerEl.innerHTML = `<div class="loading-state">⚡ Loading ${cfg.name} Player & Team Leaderboards...</div>`;
+
+    const data = await fetchLeagueLeaderboards(leagueKey);
+    if (!data) {
+      this.leaderboardsContainerEl.innerHTML = `<div class="empty-state">Unable to load ${cfg.name} leaderboards right now.</div>`;
+      return;
+    }
+
+    const q = this.searchQuery;
+    const showTeams = this.leaderboardFilter === 'all' || this.leaderboardFilter === 'teams';
+    const showPlayers = this.leaderboardFilter === 'all' || this.leaderboardFilter === 'players';
+
+    const teamBoardsHtml = showTeams
+      ? `
+        <div class="lb-section-block">
+          <div class="lb-section-heading">
+            <h2>🛡️ ${cfg.name} Team Leaderboards</h2>
+            <span>Power Rankings, Offense, Defense & Differential</span>
+          </div>
+          <div class="lb-grid">
+            ${(data.teamCategories || [])
+              .map((cat) => {
+                const filtered = (cat.leaders || []).filter((t) => {
+                  if (!q) return true;
+                  return `${t.teamName} ${t.teamAbbr}`.toLowerCase().includes(q);
+                });
+                if (!filtered.length) return '';
+                return `
+                  <div class="lb-card">
+                    <div class="lb-card-header">
+                      <h3>${cat.name}</h3>
+                      <span class="lb-sub">${cat.subtitle || ''}</span>
+                    </div>
+                    <div class="lb-list">
+                      ${filtered
+                        .map((t) => {
+                          const starred = this.followedTeams.has(t.teamUid);
+                          return `
+                            <div class="lb-row">
+                              <span class="lb-rank rank-${t.rank}">#${t.rank}</span>
+                              ${t.teamLogo ? `<img src="${t.teamLogo}" class="lb-avatar team-av" alt="${t.teamAbbr}" />` : ''}
+                              <div class="lb-main-info">
+                                <div class="lb-name-line">
+                                  <strong>${t.teamName}</strong>
+                                  <button class="star-btn ${starred ? 'starred' : ''}" data-follow="${t.teamUid}" title="Follow ${t.teamName}">★</button>
+                                </div>
+                                <span class="lb-meta-sub">${t.teamAbbr} • Record: ${t.record}</span>
+                              </div>
+                              <span class="lb-stat-val">${t.value}</span>
+                            </div>
+                          `;
+                        })
+                        .join('')}
+                    </div>
+                  </div>
+                `;
+              })
+              .join('')}
+          </div>
+        </div>
+      `
+      : '';
+
+    const playerBoardsHtml = showPlayers
+      ? `
+        <div class="lb-section-block">
+          <div class="lb-section-heading">
+            <h2>👟 ${cfg.name} Player Stat Leaders</h2>
+            <span>Top 5 Individual Performers by Category</span>
+          </div>
+          <div class="lb-grid">
+            ${(data.playerCategories || [])
+              .map((cat) => {
+                const filtered = (cat.leaders || []).filter((p) => {
+                  if (!q) return true;
+                  return `${p.playerName} ${p.teamName} ${p.teamAbbr} ${p.position}`.toLowerCase().includes(q);
+                });
+                if (!filtered.length) return '';
+                return `
+                  <div class="lb-card">
+                    <div class="lb-card-header">
+                      <h3>${cat.name}</h3>
+                      <span class="lb-sub">${cat.shortName || ''}</span>
+                    </div>
+                    <div class="lb-list">
+                      ${filtered
+                        .map((p) => {
+                          const starred = this.followedTeams.has(p.teamUid);
+                          const avatar = p.headshot || p.teamLogo || '';
+                          return `
+                            <div class="lb-row">
+                              <span class="lb-rank rank-${p.rank}">#${p.rank}</span>
+                              ${avatar ? `<img src="${avatar}" class="lb-avatar" alt="${p.playerName}" />` : `<div class="lb-avatar-fallback">${p.teamAbbr}</div>`}
+                              <div class="lb-main-info">
+                                <div class="lb-name-line">
+                                  <strong>${p.playerName}</strong>
+                                  <button class="star-btn ${starred ? 'starred' : ''}" data-follow="${p.teamUid}" title="Follow ${p.teamName}">★</button>
+                                </div>
+                                <span class="lb-meta-sub">${p.teamAbbr} • ${p.position} ${p.jersey}</span>
+                              </div>
+                              <span class="lb-stat-val">${p.value}</span>
+                            </div>
+                          `;
+                        })
+                        .join('')}
+                    </div>
+                  </div>
+                `;
+              })
+              .join('')}
+          </div>
+        </div>
+      `
+      : '';
+
+    this.leaderboardsContainerEl.innerHTML = `
+      <div class="lb-filter-bar">
+        <button class="pill-btn ${this.leaderboardFilter === 'all' ? 'spoiler-active' : ''}" data-lbfilter="all">🏆 All Leaderboards</button>
+        <button class="pill-btn ${this.leaderboardFilter === 'players' ? 'spoiler-active' : ''}" data-lbfilter="players">👟 Player Leaders Only</button>
+        <button class="pill-btn ${this.leaderboardFilter === 'teams' ? 'spoiler-active' : ''}" data-lbfilter="teams">🛡️ Team Leaders Only</button>
+      </div>
+      ${teamBoardsHtml}
+      ${playerBoardsHtml}
+    `;
+
+    Array.from(this.leaderboardsContainerEl.querySelectorAll('[data-lbfilter]')).forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.leaderboardFilter = btn.dataset.lbfilter;
+        this.renderLeaderboards(leagueKey);
+      });
+    });
+
+    Array.from(this.leaderboardsContainerEl.querySelectorAll('[data-follow]')).forEach((btn) => {
       btn.addEventListener('click', () => {
         this.toggleFollowTeam(btn.dataset.follow);
       });

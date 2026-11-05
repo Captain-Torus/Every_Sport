@@ -44,6 +44,7 @@ export const LEAGUES = {
 const scoreboardCache = new Map();
 const summaryCache = new Map();
 const standingsCache = new Map();
+const leaderboardsCache = new Map();
 
 function extractMp4FromVideoObj(v) {
   if (!v || !v.links) return null;
@@ -427,4 +428,176 @@ export async function fetchStandingsOrRankings(leagueKey) {
     console.warn('Failed loading standings/rankings:', err);
     return null;
   }
+}
+
+function collectStandingsEntries(node, bucket = []) {
+  if (!node) return bucket;
+  if (node.standings?.entries?.length) {
+    bucket.push(...node.standings.entries);
+  }
+  if (Array.isArray(node.children)) {
+    node.children.forEach((child) => collectStandingsEntries(child, bucket));
+  }
+  return bucket;
+}
+
+export async function fetchLeagueLeaderboards(leagueKey) {
+  if (leaderboardsCache.has(leagueKey)) {
+    return leaderboardsCache.get(leagueKey);
+  }
+
+  const cfg = LEAGUES[leagueKey];
+  const playerCategories = [];
+  const teamCategories = [];
+
+  // 1. Fetch Player Leaderboards from ESPN v3 leaders API
+  try {
+    const pRes = await fetch(
+      `https://site.api.espn.com/apis/site/v3/sports/${cfg.sport}/${cfg.league}/leaders`
+    );
+    const pData = await pRes.json();
+    const rawCats = pData.leaders?.categories || [];
+
+    rawCats.slice(0, 8).forEach((cat) => {
+      const leaders = (cat.leaders || []).slice(0, 5).map((l, idx) => ({
+        rank: idx + 1,
+        playerName: l.athlete?.displayName || l.athlete?.shortName || 'Player',
+        position: l.athlete?.position?.abbreviation || '',
+        jersey: l.athlete?.jersey ? `#${l.athlete.jersey}` : '',
+        headshot: l.athlete?.headshot?.href || '',
+        teamAbbr: l.team?.abbreviation || '',
+        teamName: l.team?.displayName || '',
+        teamLogo: l.team?.logos?.[0]?.href || '',
+        teamUid: `${leagueKey}:${l.team?.abbreviation || ''}`,
+        value: l.displayValue ?? l.value ?? '-'
+      }));
+
+      if (leaders.length) {
+        playerCategories.push({
+          name: cat.displayName || cat.name || 'Stat Leaders',
+          shortName: cat.shortDisplayName || cat.abbreviation || '',
+          leaders
+        });
+      }
+    });
+  } catch (err) {
+    console.warn(`Failed loading ${leagueKey} player leaders:`, err);
+  }
+
+  // 2. Build Team Leaderboards from League Standings Statistics
+  try {
+    const sRes = await fetch(
+      `https://site.api.espn.com/apis/v2/sports/${cfg.sport}/${cfg.league}/standings`
+    );
+    const sData = await sRes.json();
+    const rawEntries = collectStandingsEntries(sData, []);
+
+    // Deduplicate teams by abbreviation
+    const seenTeams = new Set();
+    const parsedTeams = [];
+
+    rawEntries.forEach((e) => {
+      const abbr = e.team?.abbreviation;
+      if (!abbr || seenTeams.has(abbr)) return;
+      seenTeams.add(abbr);
+
+      const numMap = {};
+      const dispMap = {};
+      (e.stats || []).forEach((s) => {
+        const key = s.abbreviation || s.name;
+        if (key) {
+          dispMap[key] = s.displayValue;
+          if (typeof s.value === 'number') numMap[key] = s.value;
+        }
+        if (s.name) {
+          dispMap[s.name] = s.displayValue;
+          if (typeof s.value === 'number') numMap[s.name] = s.value;
+        }
+      });
+
+      const wins = numMap.W ?? numMap.wins ?? 0;
+      const losses = numMap.L ?? numMap.losses ?? 0;
+      const winPct = numMap.PCT ?? numMap.winPercent ?? numMap.LPCT ?? (wins + losses > 0 ? wins / (wins + losses) : 0);
+      const ptsFor = numMap.PPG ?? numMap.PF ?? numMap.GF ?? numMap.pointsFor ?? 0;
+      const ptsAgainst = numMap['OPP PPG'] ?? numMap.PA ?? numMap.GA ?? numMap.pointsAgainst ?? 9999;
+      const diff = numMap.DIFF ?? numMap.pointDifferential ?? (ptsFor - ptsAgainst);
+
+      parsedTeams.push({
+        teamAbbr: abbr,
+        teamName: e.team?.displayName || abbr,
+        teamLogo: e.team?.logos?.[0]?.href || '',
+        teamUid: `${leagueKey}:${abbr}`,
+        record: dispMap.Total || `${dispMap.W ?? 0}-${dispMap.L ?? 0}`,
+        wins,
+        winPct,
+        ptsFor,
+        ptsForDisp: dispMap.PPG || dispMap.PF || dispMap.GF || String(ptsFor),
+        ptsAgainst,
+        ptsAgainstDisp: dispMap['OPP PPG'] || dispMap.PA || dispMap.GA || String(ptsAgainst),
+        diff,
+        diffDisp: dispMap.DIFF || (diff > 0 ? `+${diff}` : String(diff)),
+        streak: dispMap.STRK || '-'
+      });
+    });
+
+    if (parsedTeams.length) {
+      const makeTeamBoard = (title, subtitle, sorter, valGetter) => ({
+        name: title,
+        subtitle,
+        leaders: [...parsedTeams]
+          .sort(sorter)
+          .slice(0, 5)
+          .map((t, idx) => ({
+            rank: idx + 1,
+            teamAbbr: t.teamAbbr,
+            teamName: t.teamName,
+            teamLogo: t.teamLogo,
+            teamUid: t.teamUid,
+            record: t.record,
+            value: valGetter(t)
+          }))
+      });
+
+      const scoringLabel = leagueKey === 'nhl' ? 'Goals Scored (GF)' : leagueKey === 'nba' ? 'Points Per Game (PPG)' : 'Points Scored (PF)';
+      const defenseLabel = leagueKey === 'nhl' ? 'Fewest Goals Allowed (GA)' : leagueKey === 'nba' ? 'Opponent PPG' : 'Fewest Points Allowed (PA)';
+
+      teamCategories.push(
+        makeTeamBoard(
+          'Top Overall Teams',
+          'Win % & Record',
+          (a, b) => b.winPct - a.winPct || b.wins - a.wins || b.diff - a.diff,
+          (t) => `${t.record} (${(t.winPct * 100).toFixed(0)}%)`
+        ),
+        makeTeamBoard(
+          'Top Offense Leaderboard',
+          scoringLabel,
+          (a, b) => b.ptsFor - a.ptsFor,
+          (t) => t.ptsForDisp
+        ),
+        makeTeamBoard(
+          'Top Defense Leaderboard',
+          defenseLabel,
+          (a, b) => a.ptsAgainst - b.ptsAgainst,
+          (t) => t.ptsAgainstDisp
+        ),
+        makeTeamBoard(
+          'Point / Goal Differential',
+          'Best Margin (DIFF)',
+          (a, b) => b.diff - a.diff,
+          (t) => t.diffDisp
+        )
+      );
+    }
+  } catch (err) {
+    console.warn(`Failed building ${leagueKey} team leaderboards:`, err);
+  }
+
+  const result = {
+    leagueKey,
+    leagueName: cfg.fullName,
+    playerCategories,
+    teamCategories
+  };
+  leaderboardsCache.set(leagueKey, result);
+  return result;
 }
