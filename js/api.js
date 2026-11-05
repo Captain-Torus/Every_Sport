@@ -29,6 +29,16 @@ export const LEAGUES = {
     accent: '#06b6d4',
     defaultDates: ['20261103', '20261102', '20261101']
   },
+  mlb: {
+    id: 'mlb',
+    name: 'MLB',
+    fullName: 'Major League Baseball',
+    icon: '⚾',
+    sport: 'baseball',
+    league: 'mlb',
+    accent: '#10b981',
+    defaultDates: ['20261028', '20261027', '20261026', '20261024', '20260927']
+  },
   cfb: {
     id: 'cfb',
     name: 'CFB',
@@ -233,6 +243,60 @@ export async function fetchGameSummary(game, leagueGamesPool = []) {
       });
     }
   });
+
+  // For MLB, also pull the official 7-10m Game Highlights, Condensed Game, and play clips from MLB StatsAPI!
+  if (game.leagueKey === 'mlb') {
+    try {
+      const dtObj = new Date(game.dateIso);
+      const yyyy = dtObj.getUTCFullYear();
+      const mm = String(dtObj.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(dtObj.getUTCDate()).padStart(2, '0');
+      const mlbDate = `${yyyy}-${mm}-${dd}`;
+      const mlbUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${mlbDate}&hydrate=game(content(highlights(highlights)))`;
+      const mlbRes = await fetch(mlbUrl);
+      const mlbData = await mlbRes.json();
+      const mlbGames = mlbData.dates?.[0]?.games || [];
+
+      const parseDurSec = (durStr) => {
+        if (!durStr) return 60;
+        const parts = String(durStr).split(':').map(Number);
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+        return 60;
+      };
+
+      const matchedGame =
+        mlbGames.find((mg) => {
+          const aName = (mg.teams?.away?.team?.name || '').toLowerCase();
+          const hName = (mg.teams?.home?.team?.name || '').toLowerCase();
+          return (
+            aName.includes(game.away.name.toLowerCase()) ||
+            hName.includes(game.home.name.toLowerCase())
+          );
+        }) || mlbGames[0];
+
+      const items = matchedGame?.content?.highlights?.highlights?.items || [];
+      items.forEach((it) => {
+        const mp4Playback =
+          (it.playbacks || []).find((p) => (p.name || '').includes('mp4Avc') && (p.url || '').endsWith('.mp4')) ||
+          (it.playbacks || []).find((p) => (p.url || '').endsWith('.mp4'));
+        if (mp4Playback?.url) {
+          const isCondensed = (it.headline || '').toLowerCase().includes('condensed');
+          const isRecap = (it.headline || '').toLowerCase().includes('highlights');
+          pushClip({
+            id: String(it.id || mp4Playback.url),
+            headline: it.headline || 'MLB Highlight',
+            description: it.blurb || '',
+            duration: parseDurSec(it.duration),
+            mp4Url: mp4Playback.url,
+            tag: isCondensed ? 'CONDENSED GAME' : isRecap ? '7M GAME HIGHLIGHTS' : 'MLB PLAY'
+          });
+        }
+      });
+    } catch (err) {
+      console.warn('MLB StatsAPI highlight fetch warning:', err);
+    }
+  }
 
   // If this game's clips total under 420 seconds (~7 mins), top up the reel with
   // "Around the League" highlights from the same sport so the broadcast runs ~7+ minutes!
@@ -518,9 +582,9 @@ export async function fetchLeagueLeaderboards(leagueKey) {
       const wins = numMap.W ?? numMap.wins ?? 0;
       const losses = numMap.L ?? numMap.losses ?? 0;
       const winPct = numMap.PCT ?? numMap.winPercent ?? numMap.LPCT ?? (wins + losses > 0 ? wins / (wins + losses) : 0);
-      const ptsFor = numMap.PPG ?? numMap.PF ?? numMap.GF ?? numMap.pointsFor ?? 0;
-      const ptsAgainst = numMap['OPP PPG'] ?? numMap.PA ?? numMap.GA ?? numMap.pointsAgainst ?? 9999;
-      const diff = numMap.DIFF ?? numMap.pointDifferential ?? (ptsFor - ptsAgainst);
+      const ptsFor = numMap.PPG ?? numMap.PF ?? numMap.GF ?? numMap.RS ?? numMap.ARS ?? numMap.pointsFor ?? 0;
+      const ptsAgainst = numMap['OPP PPG'] ?? numMap.PA ?? numMap.GA ?? numMap.RA ?? numMap.ARA ?? numMap.pointsAgainst ?? 9999;
+      const diff = numMap.DIFF ?? numMap.ADIFF ?? numMap.pointDifferential ?? (ptsFor - ptsAgainst);
 
       parsedTeams.push({
         teamAbbr: abbr,
@@ -531,11 +595,11 @@ export async function fetchLeagueLeaderboards(leagueKey) {
         wins,
         winPct,
         ptsFor,
-        ptsForDisp: dispMap.PPG || dispMap.PF || dispMap.GF || String(ptsFor),
+        ptsForDisp: dispMap.PPG || dispMap.PF || dispMap.GF || dispMap.RS || dispMap.ARS || String(ptsFor),
         ptsAgainst,
-        ptsAgainstDisp: dispMap['OPP PPG'] || dispMap.PA || dispMap.GA || String(ptsAgainst),
+        ptsAgainstDisp: dispMap['OPP PPG'] || dispMap.PA || dispMap.GA || dispMap.RA || dispMap.ARA || String(ptsAgainst),
         diff,
-        diffDisp: dispMap.DIFF || (diff > 0 ? `+${diff}` : String(diff)),
+        diffDisp: dispMap.DIFF || dispMap.ADIFF || (diff > 0 ? `+${diff}` : String(diff)),
         streak: dispMap.STRK || '-'
       });
     });
@@ -558,8 +622,22 @@ export async function fetchLeagueLeaderboards(leagueKey) {
           }))
       });
 
-      const scoringLabel = leagueKey === 'nhl' ? 'Goals Scored (GF)' : leagueKey === 'nba' ? 'Points Per Game (PPG)' : 'Points Scored (PF)';
-      const defenseLabel = leagueKey === 'nhl' ? 'Fewest Goals Allowed (GA)' : leagueKey === 'nba' ? 'Opponent PPG' : 'Fewest Points Allowed (PA)';
+      const scoringLabel =
+        leagueKey === 'nhl'
+          ? 'Goals Scored (GF)'
+          : leagueKey === 'mlb'
+          ? 'Runs Scored (RS / RPG)'
+          : leagueKey === 'nba'
+          ? 'Points Per Game (PPG)'
+          : 'Points Scored (PF)';
+      const defenseLabel =
+        leagueKey === 'nhl'
+          ? 'Fewest Goals Allowed (GA)'
+          : leagueKey === 'mlb'
+          ? 'Fewest Runs Allowed (RA / RPG)'
+          : leagueKey === 'nba'
+          ? 'Opponent PPG'
+          : 'Fewest Points Allowed (PA)';
 
       teamCategories.push(
         makeTeamBoard(

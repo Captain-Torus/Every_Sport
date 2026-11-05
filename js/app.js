@@ -16,7 +16,7 @@ class SportsCenterApp {
     this.searchQuery = '';
     this.customDate = '';
     this.spoilerFree = false;
-    this.gamesByLeague = { nba: [], nfl: [], nhl: [], cfb: [] };
+    this.gamesByLeague = { nba: [], nfl: [], mlb: [], nhl: [], cfb: [] };
     this.followedTeams = this.loadFollowedTeams();
 
     this.currentGame = null;
@@ -224,10 +224,11 @@ class SportsCenterApp {
     if (this.activeTab === 'my-teams') {
       this.sectionTitleEl.textContent = '★ My Teams • Personal SportsCenter Feed';
       this.sectionSubtitleEl.textContent =
-        'All recent matchups & extended highlight reels for your followed teams across NBA, NFL, NHL & CFB';
+        'All recent matchups & extended highlight reels for your followed teams across NBA, NFL, MLB, NHL & CFB';
       const allGames = [
         ...(this.gamesByLeague.nba || []),
         ...(this.gamesByLeague.nfl || []),
+        ...(this.gamesByLeague.mlb || []),
         ...(this.gamesByLeague.nhl || []),
         ...(this.gamesByLeague.cfb || [])
       ];
@@ -249,6 +250,7 @@ class SportsCenterApp {
           ? [
               ...(this.gamesByLeague.nba || []),
               ...(this.gamesByLeague.nfl || []),
+              ...(this.gamesByLeague.mlb || []),
               ...(this.gamesByLeague.nhl || []),
               ...(this.gamesByLeague.cfb || [])
             ]
@@ -383,10 +385,15 @@ class SportsCenterApp {
     if (!this.currentGame || !this.currentSummary) return;
     const g = this.currentGame;
     const s = this.currentSummary;
-    const periods = Math.max(s.awayLines.length, s.homeLines.length, 4);
+    const basePeriods = g.leagueKey === 'mlb' ? 9 : g.leagueKey === 'nhl' ? 3 : 4;
+    const periods = Math.max(s.awayLines.length, s.homeLines.length, basePeriods);
     const headers = [];
     for (let i = 1; i <= periods; i++) {
-      headers.push(i <= 4 ? `${i}` : `OT${i - 4}`);
+      if (g.leagueKey === 'mlb') {
+        headers.push(`${i}`);
+      } else {
+        headers.push(i <= basePeriods ? `${i}` : `OT${i - basePeriods}`);
+      }
     }
 
     const mask = this.spoilerFree;
