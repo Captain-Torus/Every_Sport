@@ -1,133 +1,49 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Byron's SportsCenter • NBA, NFL, NHL & CFB</title>
-  <link rel="stylesheet" href="./styles.css" />
-</head>
-<body>
-  <!-- Top Navigation Bar -->
-  <header class="topbar">
-    <div class="brand">
-      <div class="brand-mark">SC</div>
-      <span>Byron's SportsCenter</span>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>404 — Page Not Found</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background-color: #f6f8fa;
+        color: #24292f;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        text-align: center;
+      }
+      .container {
+        max-width: 480px;
+        padding: 24px;
+      }
+      h1 {
+        font-size: 64px;
+        font-weight: 300;
+        margin: 0 0 8px;
+        color: #57606a;
+      }
+      h2 {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0 0 12px;
+      }
+      p {
+        font-size: 14px;
+        color: #57606a;
+        line-height: 1.5;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>404</h1>
+      <h2>(Why are you playing games?)</h2>
+      <p>The requested URL was not found on this server or the project has been archived.</p>
     </div>
-
-    <nav class="nav-tabs" aria-label="Sports Leagues">
-      <button class="nav-tab" data-tab="my-teams">★ My Teams</button>
-      <button class="nav-tab active" data-tab="nba">🏀 NBA</button>
-      <button class="nav-tab" data-tab="nfl">🏈 NFL</button>
-      <button class="nav-tab" data-tab="mlb">⚾ MLB</button>
-      <button class="nav-tab" data-tab="nhl">🏒 NHL</button>
-      <button class="nav-tab" data-tab="cfb">🎓 CFB</button>
-    </nav>
-
-    <div class="search-wrap">
-      <input
-        id="search-input"
-        class="search-input"
-        type="text"
-        placeholder="Search teams, cities, or matchups..."
-        autocomplete="off"
-      />
-      <span class="search-kbd">/</span>
-    </div>
-  </header>
-
-  <!-- Followed Teams Quick Ribbon -->
-  <div id="followed-teams-bar" class="followed-bar"></div>
-
-  <!-- Main Content -->
-  <main class="container">
-    <div class="section-header">
-      <div>
-        <h1 id="section-title" class="section-title">🏀 NBA • Scoreboard & Reels</h1>
-        <p id="section-subtitle" class="section-subtitle">
-          Click any matchup for the ~7-Minute Continuous Game Reel, Box Score, and Team Stats
-        </p>
-      </div>
-
-      <div class="toolbar-actions">
-        <div class="subview-switcher">
-          <button class="subview-btn active" data-subview="games">🎬 Games & Reels</button>
-          <button class="subview-btn" data-subview="leaderboards">🏆 Leaderboards</button>
-          <button class="subview-btn" data-subview="standings">📊 Standings / Top 25</button>
-        </div>
-
-        <input id="date-picker-input" type="date" class="date-input" title="Jump to specific date" />
-        <button id="reset-date-btn" class="pill-btn" style="display: none;">✕ Recent Feed</button>
-
-        <button id="spoiler-toggle-btn" class="pill-btn">
-          👁️ Scores: Visible
-        </button>
-      </div>
-    </div>
-
-    <!-- Games Scoreboard Grid -->
-    <section id="vault-grid" class="grid" aria-live="polite"></section>
-
-    <!-- Player & Team Leaderboards Container -->
-    <section id="leaderboards-container" style="display: none;"></section>
-
-    <!-- Standings / Rankings Container -->
-    <section id="standings-container" style="display: none;"></section>
-  </main>
-
-  <!-- SportsCenter Game Center & ~7-Minute Reel Modal -->
-  <div id="player-modal" class="player-modal" role="dialog" aria-modal="true">
-    <div class="player-topbar">
-      <div class="player-title-group">
-        <button id="player-close-btn" class="btn-secondary">← Back to Scoreboard</button>
-        <span id="player-title" class="player-now-playing">Matchup Center</span>
-        <span id="clip-counter-badge" class="badge">~7m Reel</span>
-      </div>
-
-      <div class="mode-switcher" aria-label="Video Render Mode">
-        <button class="mode-btn active" data-mode="hd" title="Standard HD Broadcast (M)">HD PIXELS</button>
-        <button class="mode-btn" data-mode="pixel" title="8-Bit Tecmo Bowl / NBA Jam Mode (M)">8-BIT PIXEL</button>
-        <button class="mode-btn" data-mode="ascii" title="Live Colored ASCII Renderer (M)">LIVE ASCII</button>
-      </div>
-    </div>
-
-    <!-- Split Layout: Video Reel on Left, Stats & Box Score on Right -->
-    <div class="game-center-body">
-      <div class="reel-column">
-        <div class="video-stage-wrap">
-          <video id="vault-video" controls playsinline></video>
-          <canvas id="vault-canvas"></canvas>
-          <div id="mode-toast" class="mode-toast">MODE: HD BROADCAST</div>
-        </div>
-
-        <div class="clip-controls-bar">
-          <div id="clip-now-playing" class="clip-headline-now">Loading Game Reel...</div>
-          <div class="clip-nav-btns">
-            <button id="prev-clip-btn" class="btn-secondary" title="Previous Play (P)">⏮ Prev Play</button>
-            <button id="next-clip-btn" class="btn-secondary" title="Next Play (N)">Next Play ⏭</button>
-          </div>
-        </div>
-
-        <div class="reel-playlist-header">
-          <span>CONTINUOUS GAME REEL PLAYLIST (AUTO-PLAYS)</span>
-          <small><kbd>M</kbd> Flip HD/Pixel/ASCII • <kbd>N</kbd>/<kbd>P</kbd> Next/Prev Clip</small>
-        </div>
-        <div id="reel-playlist" class="reel-playlist"></div>
-      </div>
-
-      <div class="stats-column">
-        <div id="linescore-wrap" class="linescore-box"></div>
-
-        <div class="stats-tabs-bar">
-          <button class="stats-tab-btn active" data-statstab="team-stats">📊 Team Stats</button>
-          <button class="stats-tab-btn" data-statstab="boxscore">📋 Player Box Score</button>
-          <button class="stats-tab-btn" data-statstab="plays">⚡ Scoring & Recap</button>
-        </div>
-
-        <div id="stats-panel-content" class="stats-panel-content"></div>
-      </div>
-    </div>
-  </div>
-
-  <script type="module" src="./js/app.js"></script>
-</body>
+  </body>
 </html>
